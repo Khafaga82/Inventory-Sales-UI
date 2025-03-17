@@ -1,0 +1,117 @@
+import { useState, useEffect } from "react";
+import { Card, CardContent } from "../components/ui/card";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { Button } from "../components/ui/button";
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from "../components/ui/table";
+import { fetchDashboardData, exportData, fetchCompanySettings, updateCompanySettings } from "../api/dashboard";
+import { Bell, Download, RefreshCw, Save, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { Alert, AlertTitle, AlertDescription } from "../components/ui/alert";
+import { useAuth } from "../context/AuthContext";
+import Image from "next/image";
+import { Input } from "../components/ui/input";
+
+export default function AdminDashboard() {
+  const { token } = useAuth();
+  const [dashboardData, setDashboardData] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [companyName, setCompanyName] = useState("شركة المخازن المتكاملة");
+  const [companyLogo, setCompanyLogo] = useState("/company-logo.png");
+  const [message, setMessage] = useState(null);
+  const [messageType, setMessageType] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchDashboardData(token);
+      setDashboardData(data);
+      setAlerts(data.alerts);
+    } catch (error) {
+      console.error("حدث خطأ أثناء جلب بيانات لوحة التحكم:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCompanySettings = async () => {
+    try {
+      const settings = await fetchCompanySettings(token);
+      if (settings) {
+        setCompanyName(settings.name || "شركة المخازن المتكاملة");
+        setCompanyLogo(settings.logo || "/company-logo.png");
+      }
+    } catch (error) {
+      console.error("حدث خطأ أثناء جلب إعدادات الشركة:", error);
+    }
+  };
+
+  const saveCompanySettings = async () => {
+    setLoading(true);
+    try {
+      await updateCompanySettings(token, { name: companyName, logo: companyLogo });
+      setMessage("تم حفظ الإعدادات بنجاح.");
+      setMessageType("success");
+    } catch (error) {
+      console.error("حدث خطأ أثناء حفظ إعدادات الشركة:", error);
+      setMessage("فشل في حفظ الإعدادات. الرجاء المحاولة مرة أخرى.");
+      setMessageType("error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      loadData();
+      loadCompanySettings();
+    }
+  }, [token]);
+
+  if (!dashboardData)
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="animate-spin w-10 h-10 text-gray-500" />
+      </div>
+    );
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      {/* Header */}
+      <header className="bg-gray-900 text-white p-4 flex justify-between items-center">
+        <div className="flex items-center">
+          <Image src={companyLogo} alt="شعار الشركة" width={50} height={50} />
+          <h1 className="text-2xl font-bold ml-2">{companyName}</h1>
+        </div>
+      </header>
+      
+      {/* Main Content */}
+      <main className="flex-grow grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+        <div className="col-span-1 md:col-span-2">
+          <h2 className="text-xl font-bold">إعدادات الشركة</h2>
+          {message && (
+            <Alert className={`mb-4 ${messageType === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+              {messageType === "success" ? <CheckCircle className="inline mr-2" /> : <XCircle className="inline mr-2" />} 
+              {message}
+            </Alert>
+          )}
+          <div className="mb-4">
+            <label className="block text-gray-700">اسم الشركة</label>
+            <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+          </div>
+          <div className="mb-4">
+            <label className="block text-gray-700">رابط شعار الشركة</label>
+            <Input value={companyLogo} onChange={(e) => setCompanyLogo(e.target.value)} />
+          </div>
+          <Button onClick={saveCompanySettings} className="flex items-center" disabled={loading}>
+            {loading ? <Loader2 className="animate-spin mr-2" /> : <Save className="mr-2" />} حفظ الإعدادات
+          </Button>
+        </div>
+      </main>
+      
+      {/* Footer */}
+      <footer className="bg-gray-900 text-white p-4 text-center">
+        <p>&copy; {new Date().getFullYear()} {companyName}. جميع الحقوق محفوظة.</p>
+      </footer>
+    </div>
+  );
+}
