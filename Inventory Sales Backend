@@ -1,0 +1,144 @@
+// استيراد المكتبات اللازمة
+const express = require('express');
+const mysql = require('mysql2');
+const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+
+// إنشاء التطبيق
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// إعداد قاعدة البيانات
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'root',
+    password: '',
+    database: 'inventory_sales'
+});
+
+db.connect(err => {
+    if (err) {
+        console.error('خطأ في الاتصال بقاعدة البيانات:', err);
+    } else {
+        console.log('تم الاتصال بقاعدة البيانات بنجاح');
+    }
+});
+
+// تسجيل المستخدمين وإنشاء حسابات
+app.post('/register', async (req, res) => {
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const sql = 'INSERT INTO users (username, password) VALUES (?, ?)';
+    db.query(sql, [username, hashedPassword], (err, result) => {
+        if (err) {
+            res.status(500).send('خطأ في إنشاء الحساب');
+        } else {
+            res.status(200).send('تم إنشاء الحساب بنجاح');
+        }
+    });
+});
+
+// تسجيل الدخول وإنشاء توكن JWT
+app.post('/login', (req, res) => {
+    const { username, password } = req.body;
+    const sql = 'SELECT * FROM users WHERE username = ?';
+    db.query(sql, [username], async (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(401).send('المستخدم غير موجود');
+        }
+        const user = results[0];
+        const isValid = await bcrypt.compare(password, user.password);
+        if (!isValid) {
+            return res.status(401).send('كلمة المرور غير صحيحة');
+        }
+        const token = jwt.sign({ userId: user.id }, 'secret_key', { expiresIn: '1h' });
+        res.json({ token });
+    });
+});
+
+// نقطة نهاية لإضافة منتج جديد مع دعم الباركود
+app.post('/products', (req, res) => {
+    const { name, price, quantity, barcode } = req.body;
+    const sql = 'INSERT INTO products (name, price, quantity, barcode) VALUES (?, ?, ?, ?)';
+    db.query(sql, [name, price, quantity, barcode], (err, result) => {
+        if (err) {
+            res.status(500).send('خطأ في إضافة المنتج');
+        } else {
+            res.status(200).send('تمت إضافة المنتج بنجاح');
+        }
+    });
+});
+
+// نقطة نهاية لجلب جميع المنتجات
+app.get('/products', (req, res) => {
+    db.query('SELECT * FROM products', (err, results) => {
+        if (err) {
+            res.status(500).send('خطأ في جلب المنتجات');
+        } else {
+            res.json(results);
+        }
+    });
+});
+
+// نقطة نهاية للبحث عن منتج باستخدام الباركود
+app.get('/products/barcode/:barcode', (req, res) => {
+    const { barcode } = req.params;
+    db.query('SELECT * FROM products WHERE barcode = ?', [barcode], (err, results) => {
+        if (err || results.length === 0) {
+            res.status(404).send('المنتج غير موجود');
+        } else {
+            res.json(results[0]);
+        }
+    });
+});
+
+// نقطة نهاية لإنشاء فاتورة جديدة
+app.post('/sales', (req, res) => {
+    const { products, total_price, payment_method } = req.body;
+    const sql = 'INSERT INTO sales (total_price, payment_method) VALUES (?, ?)';
+    db.query(sql, [total_price, payment_method], (err, result) => {
+        if (err) {
+            res.status(500).send('خطأ في إنشاء الفاتورة');
+        } else {
+            const saleId = result.insertId;
+            const saleItems = products.map(p => [saleId, p.id, p.quantity, p.price]);
+            db.query('INSERT INTO sales_items (sale_id, product_id, quantity, price) VALUES ?', [saleItems], err => {
+                if (err) {
+                    res.status(500).send('خطأ في حفظ تفاصيل الفاتورة');
+                } else {
+                    res.status(200).send('تم إنشاء الفاتورة بنجاح');
+                }
+            });
+        }
+    });
+});
+
+// نقطة نهاية لإرجاع منتج إلى المخزون
+app.post('/returns', (req, res) => {
+    const { sale_id, product_id, quantity, reason } = req.body;
+    db.query('SELECT * FROM sales_items WHERE sale_id = ? AND product_id = ?', [sale_id, product_id], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(404).send('العملية غير موجودة');
+        }
+        db.query('INSERT INTO returns (sale_id, product_id, quantity, reason) VALUES (?, ?, ?, ?)',
+            [sale_id, product_id, quantity, reason], (err) => {
+            if (err) {
+                return res.status(500).send('خطأ في تسجيل المرتجع');
+            }
+            db.query('UPDATE products SET quantity = quantity + ? WHERE id = ?', [quantity, product_id], (err) => {
+                if (err) {
+                    return res.status(500).send('خطأ في تحديث المخزون');
+                }
+                res.status(200).send('تم إرجاع المنتج بنجاح');
+            });
+        });
+    });
+});
+
+// تشغيل السيرفر
+const PORT = 5000;
+app.listen(PORT, () => {
+    console.log(`الخادم يعمل على المنفذ ${PORT}`);
+});
